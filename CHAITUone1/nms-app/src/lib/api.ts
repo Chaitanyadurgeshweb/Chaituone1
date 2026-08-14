@@ -4,3 +4,5 @@ export async function apiFetch(
 ): Promise<Response> {
   return fetch(path, options);
 }
+
+export default apiFetch;
