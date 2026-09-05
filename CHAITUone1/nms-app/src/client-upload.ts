@@ -44,5 +44,12 @@ export default async function uploadNmsFiles({
     sectionPaths.push(path);
   }
 
-  return { masterPath, companyPath, sectionPaths };
+  // Convert uploaded object paths to public URLs (requires the bucket to be public)
+  const masterUrl = supabase.storage.from(bucket).getPublicUrl(masterPath).data?.publicUrl;
+  const companyUrl = supabase.storage.from(bucket).getPublicUrl(companyPath).data?.publicUrl;
+  const sectionUrls = sectionPaths.map((p) => supabase.storage.from(bucket).getPublicUrl(p).data?.publicUrl || p);
+
+  if (!masterUrl || !companyUrl) throw new Error("failed to generate public URLs");
+
+  return { masterUrl, companyUrl, sectionUrls };
 }
