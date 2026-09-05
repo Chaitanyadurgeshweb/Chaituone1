@@ -1,41 +1,37 @@
-import { Router } from "express";
-import { createClient } from "@supabase/supabase-js";
+import express, { Router } from "express";
 import { processNms } from "../lib/nms-processor.js";
 
 const router = Router();
-const supa = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
-const BUCKET = process.env.SUPABASE_BUCKET!;
 const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES || 50 * 1024 * 1024);
 
 router.post("/process-nms", express.json(), async (req, res) => {
   try {
-    const { masterPath, companyPath, sectionPaths = [], filename } = req.body;
-    if (!masterPath || !companyPath || !Array.isArray(sectionPaths) || sectionPaths.length === 0) {
-      return res.status(400).json({ error: "missing masterPath, companyPath or sectionPaths" });
+    const { masterUrl, companyUrl, sectionUrls = [], filename } = req.body;
+    if (!masterUrl || !companyUrl || !Array.isArray(sectionUrls) || sectionUrls.length === 0) {
+      return res.status(400).json({ error: "missing masterUrl, companyUrl or sectionUrls" });
     }
 
-    // Helper to download from Supabase and return a Buffer
-    async function downloadToBuffer(path: string): Promise<Buffer> {
-      const { data, error } = await supa.storage.from(BUCKET).download(path);
-      if (error || !data) throw error || new Error("download failed");
-      const ab = await (data as any).arrayBuffer();
+    async function downloadUrlToBuffer(url: string): Promise<Buffer> {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`download failed: ${r.status} ${r.statusText}`);
+      const ab = await r.arrayBuffer();
       const buf = Buffer.from(ab);
-      if (buf.length > MAX_UPLOAD_BYTES) throw new Error(`file too large: ${path} (${buf.length} bytes)`);
+      if (buf.length > MAX_UPLOAD_BYTES) throw new Error(`file too large: ${url} (${buf.length} bytes)`);
       return buf;
     }
 
-    const masterBuf = await downloadToBuffer(masterPath);
-    const companyBuf = await downloadToBuffer(companyPath);
+    const masterBuf = await downloadUrlToBuffer(masterUrl);
+    const companyBuf = await downloadUrlToBuffer(companyUrl);
     const sectionFileBuffers = await Promise.all(
-      sectionPaths.map(async (p: string) => ({
-        relativePath: p.split("/").slice(1).join("/"), // keep a readable relative path
-        data: await downloadToBuffer(p),
+      sectionUrls.map(async (u: string) => ({
+        relativePath: new URL(u).pathname.split("/").pop() || u,
+        data: await downloadUrlToBuffer(u),
       }))
     );
 
     const { result, outputBuffer } = await processNms(masterBuf, companyBuf, sectionFileBuffers);
 
-    const baseName = (filename || masterPath.split("/").pop() || "result").replace(/\.[^.]+$/, "");
+    const baseName = (filename || (new URL(masterUrl).pathname.split("/").pop() || "result")).replace(/\.[^.]+$/, "");
     const outFilename = `${baseName}_updated.xlsx`;
 
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -51,7 +47,7 @@ router.post("/process-nms", express.json(), async (req, res) => {
 
     res.send(outputBuffer);
   } catch (err: any) {
-    console.error("Supabase NMS processing error:", err);
+    console.error("Public-bucket NMS processing error:", err);
     if (err.message && err.message.startsWith("file too large")) {
       return res.status(413).json({ error: err.message });
     }
