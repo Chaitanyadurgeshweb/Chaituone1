@@ -9,6 +9,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { apiFetch } from "../lib/api";
+import uploadNmsFiles from "../client-upload";
 
 interface ProcessResult {
   eligibleLocos: number;
@@ -57,20 +58,18 @@ export default function NmsUpload() {
     setLoading(true);
 
     try {
-      const form = new FormData();
-      form.append("masterFile", masterFile);
-      form.append("companyFile", companyFile);
+      // Upload files directly to Supabase from the browser
+      const { masterPath, companyPath, sectionPaths } = await uploadNmsFiles({
+        masterFile,
+        companyFile,
+        sectionFiles,
+      });
 
-      for (const f of sectionFiles) {
-        // Preserve relative path via webkitRelativePath when available
-        const relativePath =
-          (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
-        form.append("sectionFiles", f, relativePath);
-      }
-
+      // Send small JSON payload to the server with the Supabase paths
       const res = await apiFetch("/api/process-nms", {
         method: "POST",
-        body: form,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ masterPath, companyPath, sectionPaths, filename: masterFile.name }),
       });
 
       if (!res.ok) {
@@ -81,7 +80,7 @@ export default function NmsUpload() {
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const filename =
-        res.headers.get("Content-Disposition")?.match(/filename="([^"]+)"/)?.[1] ??
+        res.headers.get("Content-Disposition")?.match(/filename="([^\"]+)"/)?.[1] ??
         "result.xlsx";
 
       setDownloadUrl(url);
